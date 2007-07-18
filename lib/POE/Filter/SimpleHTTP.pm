@@ -3,49 +3,42 @@ package POE::Filter::SimpleHTTP;
 use warnings;
 use strict;
 
-=head1 NAME
+use HTTP::Status;
+use HTTP::Response;
+use HTTP::Request;
 
-POE::Filter::SimpleHTTP - The great new POE::Filter::SimpleHTTP!
+use POE::Filter::SimpleHTTP::Regex;
 
-=head1 VERSION
+use base('POE::Filter');
 
-Version 0.01
+use constant
+{
+	'RAW_BUFFER'		=> 0,
+	'HEADER_BUFFER'		=> 1,
+	'CONTENT_BUFFER'	=> 2,
+}
 
-=cut
 
 our $VERSION = '0.01';
 
-=head1 SYNOPSIS
 
-Quick summary of what the module does.
 
-Perhaps a little code snippet.
-
-    use POE::Filter::SimpleHTTP;
-
-    my $foo = POE::Filter::SimpleHTTP->new();
-    ...
-
-=head1 EXPORT
-
-A list of functions that can be exported.  You can delete this section
-if you don't export anything, such as for a purely object-oriented module.
-
-=head1 FUNCTIONS
-
-=head2 function1
-
-=cut
-
-sub function1 {
+sub new()
+{
 }
 
-=head2 function2
-
-=cut
-
-sub function2 {
+sub get_one()
+{
 }
+
+sub get_one_start()
+{
+}
+
+sub put()
+{
+}
+
 
 =head1 AUTHOR
 
