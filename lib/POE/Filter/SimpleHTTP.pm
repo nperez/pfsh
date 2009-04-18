@@ -3,6 +3,8 @@ package POE::Filter::SimpleHTTP;
 use warnings;
 use strict;
 
+use Data::Dumper;
+
 use HTTP::Status;
 use HTTP::Response;
 use HTTP::Request;
@@ -47,27 +49,49 @@ sub new()
 	return bless($self, $class);
 }
 
-sub get_one()
+sub reset()
 {
 	my ($self) = @_;
 
-	foreach my $raw (@{$self->[+RAW_BUFFER]})
+	$self->[+RAW_BUFFER]        = [];
+	$self->[+PREAMBLE_BUFFER]   = [];
+	$self->[+HEADER_BUFFER]     = [];
+	$self->[+CONTENT_BUFFER]    = [];
+	$self->[+PREAMBLE_COMPLETE] = 0;
+	$self->[+HEADER_COMPLETE]   = 0;
+	$self->[+CONTENT_COMPLETE]  = 0;
+}
+
+sub get_one()
+{
+	my ($self) = @_;
+	
+	my $buffer = '';
+
+	while(defined(my $raw = shift(@{$self->[+RAW_BUFFER]})) || length($buffer))
 	{
+		$buffer .= $raw if defined($raw);
+
 		if(!$self->[+PREAMBLE_COMPLETE])
 		{
-			if($raw =~ /^\x0D\x0A?|\x0A\x0D?/)
+			if($buffer =~ /^\x0D\x0A/)
 			{
+				# skip the blank lines at the beginning if we have them
+				substr($buffer, 0, 2, '');
 				next;
 			
 			} else {
 				
-				if($RE{'PFSH'}->{'request'}->matches($raw)
-					or $RE{'PFSH'}->{'response'}->matches($raw)) 
+				if($buffer =~ $POE::Filter::SimpleHTTP::Regex::REQUEST
+					or $buffer =~ $POE::Filter::SimpleHTTP::Regex::RESPONSE) 
 				{
-					push(@{$self->[+PREAMBLE_BUFFER]}, $raw);
+					my $match = $self->get_chunk(\$buffer);
+					push(@{$self->[+PREAMBLE_BUFFER]}, $match);
 					$self->[+PREAMBLE_COMPLETE] = 1;
 
 				} else {
+					
+					return undef;
 
 					# XXX The first line just didn't parse
 					# XXX Decide the error state and what gets returned
@@ -75,28 +99,48 @@ sub get_one()
 			}
 
 		} elsif(!$self->[+HEADER_COMPLETE]) {
-
-			if($raw =~ /^\x0D\x0A?|\x0A\x0D?/)
+			
+			if($buffer =~ /^\x0D\x0A/)
 			{
+				substr($buffer, 0, 2, '');
 				$self->[+HEADER_COMPLETE] = 1;
 			
 			} else {
+				
+				#gather all of the headers from this chunk
+				while($buffer =~ $POE::Filter::SimpleHTTP::Regex::HEADER 
+					and $buffer !~ /^\x0D\x0A/)
+				{
+					my $match = $self->get_chunk(\$buffer);
+					push(@{$self->[+HEADER_BUFFER]}, $match);
+				}
 
-				push(@{$self->[+HEADER_BUFFER]}, $raw);
 			}
 
 		} elsif(!$self->[+CONTENT_COMPLETE]) {
-
-			if($raw =~ /^\x0D\x0A?|\x0A\x0D?/)
+			
+			if($buffer =~ /^\x0D\x0A/)
 			{
+				substr($buffer, 0, 2, '');
 				$self->[+CONTENT_COMPLETE] = 1;
 
 			} else {
+				
+				if(index($buffer, "\x0D\x0A") == -1)
+				{
+					push(@{$self->[+CONTENT_BUFFER]}, $buffer);
+				
+				} else {
 
-				push(@{$self->[+CONTENT_BUFFER]}, $raw);
+					my $match = $self->get_chunk(\$buffer);
+					push(@{$self->[+CONTENT_BUFFER]}, $match);
+				}
+
 			}
+
 		} else {
-			
+		
+			return undef;
 			# XXX We have left overs
 			# XXX Decide an error state and what gets returned
 		
@@ -109,6 +153,7 @@ sub get_one()
 	}
 	else
 	{
+		warn Dumper($self);
 		return [];
 	}
 }
@@ -121,23 +166,45 @@ sub get_one_start()
 	{
 		$data = [$data];
 	}
+
+	push(@{$self->[+RAW_BUFFER]}, @$data);
 	
-	foreach(@$data)
-	{
-		push
-		(
-			@{$self->[+RAW_BUFFER]}, 
-			split
-			(
-				/\x0D\x0A?|\x0A\x0D?/,
-				$_,
-			),
-		);
-	}
 }
 
 sub put()
 {
+}
+
+
+sub get_chunk()
+{
+	my ($self, $buffer) = @_;
+
+	#find the break
+	my $break = index($$buffer, "\x0D\x0A");
+	
+	my $match;
+	if($break == -1)
+	{
+		#pullout the whole string
+		$match = substr($$buffer, 0, length($$buffer), '');
+	
+	} elsif($break > 0) {
+		
+		#pull out string until newline
+		$match = substr($$buffer, 0, $break, '');
+		
+		#remove the CRLF from the buffer
+		substr($$buffer, 0, 2, '');
+	
+	} else {
+
+		# XXX We shouldn't get here
+		return undef;
+	}
+
+
+	return $match;
 }
 
 sub build_message()
@@ -146,54 +213,67 @@ sub build_message()
 	
 	my $message;
 
-	if($RE{'PFSH'}->{'request'}->{'-keep'}->matches($self->[+PREAMBLE_BUFFER]))
+	my ($preamble) = @{$self->[+PREAMBLE_BUFFER]};
+
+	if($preamble =~ $POE::Filter::SimpleHTTP::Regex::REQUEST)
 	{
 		my ($method, $uri) = ($1, $2);
 
 		$message = HTTP::Request->new($method, $uri);
 	
-	} elsif($RE{'PFSH'}->{'response'}->{'-keep'}
-		->matches($self->[+PREAMBLE_BUFFER])) {
+	} elsif($preamble =~ $POE::Filter::SimpleHTTP::Regex::RESPONSE) {
 	
 		my ($code, $text) = ($2, $3);
 
 		$message = HTTP::Response->new($code, $text);
+	
+	} else {
+
+		die q/Something didn't match!/;
 	}
+
 
 	foreach my $line (@{$self->[+HEADER_BUFFER]})
 	{
-		if($RE{'PFHS'}->{'header'}->{'-keep'}->matches($line))
+		if($line =~ $POE::Filter::SimpleHTTP::Regex::HEADER)
 		{
-			my ($key, $value) = ($1, $2);
-			$message->header($key, $value);
+			$message->header($1, $2);
 		}
 	}
+
+	warn Dumper($message);
 	
 	# If we have a transfer encoding, we need to decode it 
 	# (ie. unchunkify, decompress, etc)
 	if($message->header('Transfer-Encoding'))
 	{
+		warn 'INSIDE TE';
 		my $te_raw = $message->header('Transfer-Encoding');
 		my $te_s = 
-		\@{ 
-			map 
-			{ 
-				my ($token) = split(/;/, $_); $token; 
-			} 
-			(reverse(split(/,/, $te_raw)))
-		};
+		[ 
+			(
+				map 
+				{ 
+					my ($token) = split(/;/, $_); $token; 
+				} 
+				(reverse(split(/,/, $te_raw)))
+			)
+		];
 		
 		my $buffer = '';
 		my $subbuff = '';
 		my $size = 0;
 
-		while( my $line = shift(@{$self->[+CONTENT_BUFFER]}) )
+		while( my $content_line = shift(@{$self->[+CONTENT_BUFFER]}) )
 		{
 			# Start of a new chunk
 			if($size == 0 and length($subbuff) == 0)
 			{
-				$line =~ /^([\dA-Fa-f]+).*\x0D\x0A?|\x0A\x0D?/;
-				$size = hex($1);
+				if($content_line =~ /^([\dA-Fa-f]+)(?:\x0D\x0A)*/)
+				{
+					warn $1;
+					$size = hex($1);
+				}
 				
 				# If we got a zero size, it means time to process trailing 
 				# headers if enabled
@@ -203,8 +283,7 @@ sub build_message()
 					{
 						while( my $tline = shift(@{$self->[+CONTENT_BUFFER]}) )
 						{
-							if($RE{'PFHS'}->{'header'}->{'-keep'}
-								->matches($tline))
+							if($tline =~ $POE::Filter::SimpleHTTP::Regex::HEADER)
 							{
 								my ($key, $value) = ($1, $2);
 								$message->header($key, $value);
@@ -216,26 +295,29 @@ sub build_message()
 				}
 			}
 			
-			my $offset = 0;
-
 			while($size > 0)
 			{
+				warn $size;
 				my $subline = shift(@{$self->[+CONTENT_BUFFER]});
 				
 				while(length($subline))
 				{
-					$subbuff .= substr($subline, $offset, 4096, '');
-					$size -= length($subbuff);
-					$offset += length($subbuff);
+					my $buff = substr($subline, 0, 4096, '');
+					$size -= length($buff);
+					$subbuff .= $buff;
 				}
 			}
 
-			$buffer .= substr($subbuff, 0, length($subbuff), '');
+			$buffer .= $subbuff;
+
+			$subbuff = '';
 		}
 		
 		my $chunk = shift(@$te_s);
 		if($chunk !~ /chunked/)
 		{
+			warn 'CHUNKED ISNT LAST';
+			return undef;
 			# XXX Determine error state for the chunked not being the last 
 			# Transfer-Encoding
 		}
@@ -247,6 +329,8 @@ sub build_message()
 				my ($inflate, $status) = Compress::Zlib::inflateInit();
 				if(!defined($inflate))
 				{
+					warn 'INFLATE FAILED TO INIT';
+					return undef;
 					# XXX Do something with the error $status
 				}
 				else
@@ -254,6 +338,8 @@ sub build_message()
 					my ($buffer, $status) = $inflate->(\$buffer);
 					if($status != +Z_OK or $status != +Z_STREAM_END)
 					{
+						warn 'INFLATE FAILED TO WORK';
+						return undef;
 						# XXX Do something with the error $status
 					}
 				}
@@ -263,6 +349,8 @@ sub build_message()
 				$buffer = Compress::Zlib::uncompress(\$buffer);
 				if(!defined($buffer))
 				{
+					warn 'COMPRESS FAILED TO WORK';
+					return undef;
 					# XXX Do something with the error
 				}
 
@@ -271,11 +359,15 @@ sub build_message()
 				$buffer = Complress::Zlib::memGunzip(\$buffer);
 				if(!defined($buffer))
 				{
+					warn 'GUNZIP FAILED';
+					return undef;
 					# XXX Do something with the error $status
 				}
 			
 			} else {
-
+					
+					warn 'UNKNOWN TE';
+					return undef;
 				# XXX Do something with the error $status
 			}
 		}
