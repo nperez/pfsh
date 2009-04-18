@@ -61,7 +61,7 @@ sub gen_octet
     return '[' . quote_it($foo) . ']';
 }
 
-sub gen_separator
+sub gen_separators
 {
 	my $foo = join 
 	(
