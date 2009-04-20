@@ -21,14 +21,7 @@ sub quote_it
 
 sub gen_char
 {
-    my $foo;
-
-    for(0..127)
-    {
-        $foo .= chr($_);
-    }
-
-    return '[' . quote_it($foo) . ']';
+    return '[' . quote_it( join('', map { chr($_) } 0..127) ) . ']';
 }
 
 sub exclude
@@ -44,50 +37,30 @@ sub exclude
 
 sub gen_ctrl
 {
-    my $foo;
-
-    for(0..31)
-    {
-        $foo .= chr($_);
-    }
-
-    $foo .= chr(127);
-
-    return '[' . quote_it($foo) . ']';
+    return '[' . quote_it( join '', map { chr($_) } (0..31, 127) ) . ']';
 }
 
 sub gen_octet
 {
-    my $foo;
-
-    for(0..255)
-    {
-        $foo .= chr($_);
-    }
-
-    return '[' . quote_it($foo) . ']';
+    return '[' . quote_it( join('', map { chr($_) } 0..255) ) . ']';
 }
 
 sub gen_separators
 {
-	my $foo = join 
+	return join 
 	(
 		'|',
 		( 
-			map { chr(92).$_ } 
+			map { chr(92).$_ }
 			(
 				split
 				(
 					/\s/,
-				 	'( ) < > @ , ; : \ " / [ ] ? = { }'
+				 	'( ) < > @ , ; : \ " / [ ] ? = { }'.' '.chr(32).' '.chr(9)
 				)
 			)
 		)
 	);
-
-	$foo .= chr(32) . ' | ' . chr(9);
-
-	return "$foo";
 }
 
 my $oct			= gen_octet();
@@ -130,46 +103,47 @@ our $RESPONSE = qr/$resp_line/;
 our $REQUEST = qr/$req_line/;
 our $HEADER = qr/$header/;
 
-my $HTTP = 'HTTP/1.1';
-my $CODE = '200';
-my $MESSAGE = 'OK';
-
-if($HTTP =~ /(?:$httpvers)/)
-{
-	warn 'PASSED HTTP';
-}
-
-if($CODE =~ /(?:$resp_code)/)
-{
-	warn 'PASSED RESPONSE CODE';
-}
-
-if($MESSAGE =~ /(?:$text)/)
-{
-	warn 'PASSED MESSAGE TEXT';
-}
-
-my $COMBINED = "$HTTP $CODE $MESSAGE\x0D\x0A";
-
-if($COMBINED =~ /(?:$httpvers)$sp(?:$resp_code)$sp(?:$text)*$crlf/)
-{
-	warn 'PASSED RESPONSE LINE';
-}
-
-my $HEADER = "Server: Apache/1.3.37 (Unix) mod_perl/1.29";
-
-if($HEADER =~ /(?:$token):(?:$f_value)*/)
-{
-	warn 'PASSED HEADER 1 ';
-}
-
-my $HEAD2 = "Date: Sun, 05 Aug 2007 18:46:50 GMT";
-
-if($HEAD2 =~ $POE::Filter::SimpleHTTP::Regex::HEADER)
-{
-	warn $1;
-	warn $2;
-}
+#my $HTTP = 'HTTP/1.1';
+#my $CODE = '200';
+#my $MESSAGE = 'OK';
+#
+#if($HTTP =~ /(?:$httpvers)/)
+#{
+#	warn 'PASSED HTTP';
+#}
+#
+#if($CODE =~ /(?:$resp_code)/)
+#{
+#	warn 'PASSED RESPONSE CODE';
+#}
+#
+#if($MESSAGE =~ /(?:$text)/)
+#{
+#	warn 'PASSED MESSAGE TEXT';
+#}
+#
+#my $COMBINED = "$HTTP $CODE $MESSAGE\x0D\x0A";
+#
+#if($COMBINED =~ /(?:$httpvers)$sp(?:$resp_code)$sp(?:$text)*$crlf/)
+#{
+#	warn 'PASSED RESPONSE LINE';
+#}
+#
+#my $HEAD1 = "Server: Apache/1.3.37 (Unix) mod_perl/1.29";
+#
+#if($HEAD1 =~ /(?:$token):(?:$f_value)*/)
+#{
+#	warn 'PASSED HEADER 1 ';
+#}
+#
+#my $HEAD2 = "Date: Sun, 05 Aug 2007 18:46:50 GMT";
+#
+#if($HEAD2 =~ $POE::Filter::SimpleHTTP::Regex::HEADER)
+#{
+#    warn 'PASSED HEADER2';
+#	warn $1;
+#	warn $2;
+#}
 #$string =~ s/[[:cntrl:]]//g;
 #$string =~ s/(?<!\\)(\()(?!\?:)/\n$1\n/g;
 #$string =~ s/(?<!\\)(\()(?=\?:)/\n\t$1/g;
