@@ -1,78 +1,185 @@
 package POE::Filter::SimpleHTTP;
+use Moose;
+extends('POE::Filter', 'Moose::Object');
 
-use warnings;
-use strict;
+use Moose::Util::TypeConstraints;
 
 use Data::Dumper;
-
 use HTTP::Status;
 use HTTP::Response;
 use HTTP::Request;
-
+use URI;
 use Compress::Zlib;
-
 use Regexp::Common;
-use POE::Filter::SimpleHTTP::Regex;
 
-use base('POE::Filter');
+use POE::Filter::SimpleHTTP::Regex;
+use POE::Filter::SimpleHTTP::Error;
 
 use bytes;
 
+our $VERSION = '0.01';
+our $DEBUG = 0;
+
 use constant
 {
-	'RAW_BUFFER'		=> 0,
-	'PREAMBLE_BUFFER'	=> 1,
-	'HEADER_BUFFER'		=> 2,
-	'CONTENT_BUFFER'	=> 3,
-	'LEFT_OVERS'		=> 4,
-	'PREAMBLE_COMPLETE'	=> 5,
-	'HEADER_COMPLETE'	=> 6,
-	'CONTENT_COMPLETE'	=> 7,
+    PARSE_START         => 0,
+    PREAMBLE_COMPLETE   => 1,
+    HEADER_COMPLETE     => 2,
+    CONTENT_COMPLETE    => 3,
+    CLIENT_MODE         => 0,
+    SERVER_MODE         => 1,
 };
 
-our $VERSION = '0.01';
+subtype 'ParseState'
+    => as 'Int'
+    => where { -1 < $_  && $_ < 4 }
+    => message { 'Incorrect ParseState' };
 
-sub new()
+subtype 'FilterMode'
+    => as 'Int'
+    => where { $_ == 0 || $_ == 0 }
+    => message { 'Incorrect FilterMode' };
+
+subtype 'Uri'
+    => as 'Object'
+    => where { $_->isa('URI') };
+
+coerce 'Uri'
+    => from 'Object'
+        => via { $_->isa('URI') 
+            ? $_ 
+            : Params::Coerce::coerce( 'URI', $_ ) }
+    => from 'Str'
+        => via { URI->new( $_, 'http' ) };
+
+has raw => 
+(
+    is => 'rw', 
+    isa => 'ArrayRef[Str]', 
+    default => sub {[]},
+    clearer => 'clear_raw',
+    lazy => 1
+);
+
+has preamble => 
+( 
+    is => 'rw', 
+    isa => 'ArrayRef[Str]', 
+    default => sub {[]},
+    clearer => 'clear_preamble',
+    lazy => 1
+);
+
+has header => 
+( 
+    is => 'rw', 
+    isa => 'ArrayRef[Str]', 
+    default => sub {[]},
+    clearer => 'clear_header',
+    lazy => 1
+);
+
+has content => 
+( 
+    is => 'rw', 
+    isa => 'ArrayRef[Str]', 
+    default => sub {[]},
+    clearer => 'clear_content',
+    lazy => 1
+);
+
+has state => 
+( 
+    is => 'rw', 
+    isa => 'ParseState',
+    default => 0,
+    clearer => 'clear_state',
+    lazy => 1
+);
+
+has mode => 
+( 
+    is => 'rw', 
+    isa => 'FilterMode',
+    default => 0,
+    lazy => 1
+);
+
+has uri => 
+( 
+    is => 'rw', 
+    isa => 'Uri', 
+    default => '/',
+    lazy => 1
+);
+
+has useragent => 
+( 
+    is => 'rw', 
+    isa => 'Str', 
+    default => __PACKAGE__ . '/' . $VERSION,
+    lazy => 1
+);
+
+has host => 
+( 
+    is => 'rw', 
+    isa => 'Str', 
+    default => 'localhost',
+    lazy => 1
+);
+
+has server => 
+( 
+    is => 'rw', 
+    isa => 'Str', 
+    default => __PACKAGE__ . '/' . $VERSION,
+    lazy => 1
+);
+
+has mimetype =>
+(
+    is => 'rw',
+    isa => 'Str',
+    default => 'text/plain',
+    lazy => 1
+);
+
+sub new 
 {
-	my ($class, $options) = @_;
+    my $class = shift(@_);
 
-	my $self = [];
-
-	$self->[+RAW_BUFFER]		= [];
-	$self->[+PREAMBLE_BUFFER] 	= [];
-	$self->[+HEADER_BUFFER] 	= [];
-	$self->[+CONTENT_BUFFER] 	= [];
-	$self->[+PREAMBLE_COMPLETE]	= 0;
-	$self->[+HEADER_COMPLETE] 	= 0;
-	$self->[+CONTENT_COMPLETE] 	= 0;
-
-	return bless($self, $class);
+    return $class->meta->new_object
+    (
+        __INSTANCE__ => bless({}, $class),
+        @_,
+    );
 }
+
 
 sub reset()
 {
 	my ($self) = @_;
-
-	$self->[+RAW_BUFFER]        = [];
-	$self->[+PREAMBLE_BUFFER]   = [];
-	$self->[+HEADER_BUFFER]     = [];
-	$self->[+CONTENT_BUFFER]    = [];
-	$self->[+PREAMBLE_COMPLETE] = 0;
-	$self->[+HEADER_COMPLETE]   = 0;
-	$self->[+CONTENT_COMPLETE]  = 0;
+    $self->clear_raw();
+    $self->clear_preamble();
+    $self->clear_header();
+    $self->clear_content();
+    $self->clear_state();
 }
 
-sub get_one()
+override 'get_one' => 
+sub
 {
 	my ($self) = @_;
 	
 	my $buffer = '';
 
-	while(defined(my $raw = shift(@{$self->[+RAW_BUFFER]})) || length($buffer))
+	while(defined(my $raw = shift(@{$self->raw()})) || length($buffer))
 	{
 		$buffer .= $raw if defined($raw);
+        my $state = $self->state();
 
-		if(!$self->[+PREAMBLE_COMPLETE])
+		if($state < +PREAMBLE_COMPLETE)
 		{
 			if($buffer =~ /^\x0D\x0A/)
 			{
@@ -83,27 +190,31 @@ sub get_one()
 			} else {
 				
 				if($buffer =~ $POE::Filter::SimpleHTTP::Regex::REQUEST
-					or $buffer =~ $POE::Filter::SimpleHTTP::Regex::RESPONSE) 
+			        or $buffer =~ $POE::Filter::SimpleHTTP::Regex::RESPONSE)
 				{
-					my $match = $self->get_chunk(\$buffer);
-					push(@{$self->[+PREAMBLE_BUFFER]}, $match);
-					$self->[+PREAMBLE_COMPLETE] = 1;
+                    push(@{$self->preamble()}, $self->get_chunk(\$buffer));
+                    $self->state(+PREAMBLE_COMPLETE);
 
 				} else {
 					
-					return undef;
+					return 
+                    [
+                        POE::Filter::SimpleHTTP::Error->new
+                        (
+                            +UNPARSABLE_PREAMBLE,
+                            $buffer
+                        )
+                    ];
 
-					# XXX The first line just didn't parse
-					# XXX Decide the error state and what gets returned
 				}
 			}
 
-		} elsif(!$self->[+HEADER_COMPLETE]) {
+		} elsif($state < +HEADER_COMPLETE) {
 			
 			if($buffer =~ /^\x0D\x0A/)
 			{
 				substr($buffer, 0, 2, '');
-				$self->[+HEADER_COMPLETE] = 1;
+				$self->state(+HEADER_COMPLETE);
 			
 			} else {
 				
@@ -111,54 +222,57 @@ sub get_one()
 				while($buffer =~ $POE::Filter::SimpleHTTP::Regex::HEADER 
 					and $buffer !~ /^\x0D\x0A/)
 				{
-					my $match = $self->get_chunk(\$buffer);
-					push(@{$self->[+HEADER_BUFFER]}, $match);
+					push(@{$self->header()}, $self->get_chunk(\$buffer));
 				}
 
 			}
 
-		} elsif(!$self->[+CONTENT_COMPLETE]) {
+		} elsif($state < +CONTENT_COMPLETE) {
 			
 			if($buffer =~ /^\x0D\x0A/)
 			{
 				substr($buffer, 0, 2, '');
-				$self->[+CONTENT_COMPLETE] = 1;
+				$self->state(+CONTENT_COMPLETE);
 
 			} else {
 				
 				if(index($buffer, "\x0D\x0A") == -1)
 				{
-					push(@{$self->[+CONTENT_BUFFER]}, $buffer);
+					push(@{$self->content}, $buffer);
 				
 				} else {
 
-					my $match = $self->get_chunk(\$buffer);
-					push(@{$self->[+CONTENT_BUFFER]}, $match);
+					push(@{$self->content}, $self->get_chunk(\$buffer));
 				}
 
 			}
 
 		} else {
-		
-			return undef;
-			# XXX We have left overs
-			# XXX Decide an error state and what gets returned
-		
+		    
+            return
+            [
+                POE::Filter::SimpleHTTP::Error->new
+                (
+                    +TRAILING_DATA,
+                    $buffer
+                )
+            ];
 		}
 	}
 		
-	if($self->[+CONTENT_COMPLETE])
+	if($self->state() == +CONTENT_COMPLETE)
 	{
 		return [$self->build_message()];
 	}
 	else
 	{
-		warn Dumper($self);
+		warn Dumper($self) if $DEBUG;
 		return [];
 	}
-}
+};
 
-sub get_one_start()
+override 'get_one_start' =>
+sub
 {
 	my ($self, $data) = @_;
 	
@@ -167,13 +281,46 @@ sub get_one_start()
 		$data = [$data];
 	}
 
-	push(@{$self->[+RAW_BUFFER]}, @$data);
+	push(@{$self->raw()}, @$data);
 	
-}
+};
 
-sub put()
+override 'put' =>
+sub
 {
-}
+	my ($self, $content) = @_;
+	
+	my $http;
+
+	if($self->mode() == +SERVER_MODE)
+	{
+		my $response;
+		
+        $response = HTTP::Response->new(+RC_OK);
+        $response->content_type($self->mimetype());
+        $response->server($self->server());
+        
+        $response->add_content($_) for @$content;
+
+		$http = $response;
+
+	} else {
+
+		my $request = HTTP::Request->new();
+
+        $request->method('POST');
+        $request->uri($self->uri());
+        $request->user_agent($self->useragent()); 
+        
+		$request->add_content($_) for @$content;
+		
+		$http = $request;
+	}
+
+	$http->protocol('HTTP/1.0');
+	
+	return [$http];
+};
 
 
 sub get_chunk()
@@ -184,25 +331,20 @@ sub get_chunk()
 	my $break = index($$buffer, "\x0D\x0A");
 	
 	my $match;
-	if($break == -1)
+
+	if($break < 0)
 	{
 		#pullout the whole string
 		$match = substr($$buffer, 0, length($$buffer), '');
 	
-	} elsif($break > 0) {
+	} elsif($break > -1) {
 		
 		#pull out string until newline
 		$match = substr($$buffer, 0, $break, '');
 		
 		#remove the CRLF from the buffer
 		substr($$buffer, 0, 2, '');
-	
-	} else {
-
-		# XXX We shouldn't get here
-		return undef;
 	}
-
 
 	return $match;
 }
@@ -213,7 +355,7 @@ sub build_message()
 	
 	my $message;
 
-	my ($preamble) = @{$self->[+PREAMBLE_BUFFER]};
+	my $preamble = shift(@{$self->preamble()});
 
 	if($preamble =~ $POE::Filter::SimpleHTTP::Regex::REQUEST)
 	{
@@ -226,14 +368,10 @@ sub build_message()
 		my ($code, $text) = ($2, $3);
 
 		$message = HTTP::Response->new($code, $text);
-	
-	} else {
-
-		die q/Something didn't match!/;
 	}
 
 
-	foreach my $line (@{$self->[+HEADER_BUFFER]})
+	foreach my $line (@{$self->header()})
 	{
 		if($line =~ $POE::Filter::SimpleHTTP::Regex::HEADER)
 		{
@@ -241,13 +379,13 @@ sub build_message()
 		}
 	}
 
-	warn Dumper($message);
+	warn Dumper($message) if $DEBUG;
 	
 	# If we have a transfer encoding, we need to decode it 
 	# (ie. unchunkify, decompress, etc)
 	if($message->header('Transfer-Encoding'))
 	{
-		warn 'INSIDE TE';
+		warn 'INSIDE TE' if $DEBUG;
 		my $te_raw = $message->header('Transfer-Encoding');
 		my $te_s = 
 		[ 
@@ -264,7 +402,7 @@ sub build_message()
 		my $subbuff = '';
 		my $size = 0;
 
-		while( my $content_line = shift(@{$self->[+CONTENT_BUFFER]}) )
+		while( my $content_line = shift(@{$self->content()}) )
 		{
 			# Start of a new chunk
 			if($size == 0 and length($subbuff) == 0)
@@ -281,7 +419,7 @@ sub build_message()
 				{
 					if($message->header('Trailer'))
 					{
-						while( my $tline = shift(@{$self->[+CONTENT_BUFFER]}) )
+						while( my $tline = shift(@{$self->content()}) )
 						{
 							if($tline =~ $POE::Filter::SimpleHTTP::Regex::HEADER)
 							{
@@ -298,7 +436,7 @@ sub build_message()
 			while($size > 0)
 			{
 				warn $size;
-				my $subline = shift(@{$self->[+CONTENT_BUFFER]});
+				my $subline = shift(@{$self->content()});
 				
 				while(length($subline))
 				{
@@ -316,10 +454,13 @@ sub build_message()
 		my $chunk = shift(@$te_s);
 		if($chunk !~ /chunked/)
 		{
-			warn 'CHUNKED ISNT LAST';
-			return undef;
-			# XXX Determine error state for the chunked not being the last 
-			# Transfer-Encoding
+			warn 'CHUNKED ISNT LAST' if $DEBUG;
+            
+            return POE::Filter::SimpleHTTP::Error->new
+            (
+                +CHUNKED_ISNT_LAST,
+                join(' ',($chunk, @$te_s))
+            );
 		}
 
 		foreach my $te (@$te_s)
@@ -329,18 +470,24 @@ sub build_message()
 				my ($inflate, $status) = Compress::Zlib::inflateInit();
 				if(!defined($inflate))
 				{
-					warn 'INFLATE FAILED TO INIT';
-					return undef;
-					# XXX Do something with the error $status
+					warn 'INFLATE FAILED TO INIT' if $DEBUG;
+                    return POE::Filter::SimpleHTTP::Error->new
+                    (
+                        +INFLATE_FAILED_INIT,
+                        $status
+                    );
 				}
 				else
 				{
 					my ($buffer, $status) = $inflate->(\$buffer);
 					if($status != +Z_OK or $status != +Z_STREAM_END)
 					{
-						warn 'INFLATE FAILED TO WORK';
-						return undef;
-						# XXX Do something with the error $status
+						warn 'INFLATE FAILED TO DECOMPRESS' if $DEBUG;
+						return POE::Filter::SimpleHTTP::Error->new
+                        (
+                            +INFLATE_FAILED_INFLATE,
+                            $status
+                        );
 					}
 				}
 			
@@ -349,9 +496,11 @@ sub build_message()
 				$buffer = Compress::Zlib::uncompress(\$buffer);
 				if(!defined($buffer))
 				{
-					warn 'COMPRESS FAILED TO WORK';
-					return undef;
-					# XXX Do something with the error
+					warn 'UNCOMPRESS FAILED' if $DEBUG;
+					return POE::Filter::SimpleHTTP::Error->new
+                    (
+                        +UNCOMPRESS_FAILED
+                    );
 				}
 
 			} elsif($te =~ /gzip/) {
@@ -359,16 +508,21 @@ sub build_message()
 				$buffer = Complress::Zlib::memGunzip(\$buffer);
 				if(!defined($buffer))
 				{
-					warn 'GUNZIP FAILED';
-					return undef;
-					# XXX Do something with the error $status
+					warn 'GUNZIP FAILED' if $DEBUG;
+					return POE::Filter::SimpleHTTP::Error->new
+                    (
+                        +GUNZIP_FAILED
+                    );
 				}
 			
 			} else {
-					
-					warn 'UNKNOWN TE';
-					return undef;
-				# XXX Do something with the error $status
+                
+                warn 'UNKNOWN TRANSFER ENCOODING' if $DEBUG;
+                return POE::Filter::SimpleHTTP::Error->new
+                (
+                    +UNKNOWN_TRANSFER_ENCODING,
+                    $te
+                );
 			}
 		}
 
@@ -376,7 +530,7 @@ sub build_message()
 	
 	} else {
 
-		$message->add_content($_) for @{$self->[+CONTENT_BUFFER]};
+		$message->add_content($_) for @{$self->content()};
 	}
 
 	# We have the type, the headers, and the content. Return the object
