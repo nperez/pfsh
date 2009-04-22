@@ -1,4 +1,6 @@
 package POE::Filter::SimpleHTTP::Error;
+use Moose;
+use Moose::Util::TypeConstraints;
 
 use warnings;
 use strict;
@@ -20,5 +22,23 @@ use base('Exporter');
 our @EXPORT = qw/ UNPARSABLE_PREAMBLE TRAILING_DATA CHUNKED_ISNT_LAST 
     INFLATE_FAILED_INIT INFLATE_FAILED_INFLATE UNCOMPRESS_FAILED
     GUNZIP_FAILED UNKNOWN_TRANSFER_ENCODING /;
+
+subtype 'ErrorType'
+    => as 'Int'
+    => where { -1 < $_ && $_ < 8 }
+    => message { 'Invalid ErrorType' };
+
+has 'error' =>
+(
+    is => 'rw',
+    isa => 'ErrorType'
+);
+
+has 'context' =>
+(
+    is => 'rw',
+    isa => 'Str',
+);
+
 
 1;

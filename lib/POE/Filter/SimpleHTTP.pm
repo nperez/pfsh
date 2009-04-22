@@ -1,4 +1,5 @@
 package POE::Filter::SimpleHTTP;
+use 5.010;
 use Moose;
 extends('POE::Filter', 'Moose::Object');
 
@@ -10,7 +11,6 @@ use HTTP::Response;
 use HTTP::Request;
 use URI;
 use Compress::Zlib;
-use Regexp::Common;
 
 use POE::Filter::SimpleHTTP::Regex;
 use POE::Filter::SimpleHTTP::Error;
@@ -167,8 +167,7 @@ sub reset()
     $self->clear_state();
 }
 
-override 'get_one' => 
-sub
+sub get_one()
 {
 	my ($self) = @_;
 	
@@ -179,35 +178,35 @@ sub
 		$buffer .= $raw if defined($raw);
         my $state = $self->state();
 
+
 		if($state < +PREAMBLE_COMPLETE)
 		{
-			if($buffer =~ /^\x0D\x0A/)
-			{
-				# skip the blank lines at the beginning if we have them
-				substr($buffer, 0, 2, '');
-				next;
-			
-			} else {
+            if($buffer =~ /^\x0D\x0A/)
+            {
+                # skip the blank lines at the beginning if we have them
+                substr($buffer, 0, 2, '');
+                next;
+            }
 				
-				if($buffer =~ $POE::Filter::SimpleHTTP::Regex::REQUEST
-			        or $buffer =~ $POE::Filter::SimpleHTTP::Regex::RESPONSE)
-				{
-                    push(@{$self->preamble()}, $self->get_chunk(\$buffer));
-                    $self->state(+PREAMBLE_COMPLETE);
+            if($buffer =~ $POE::Filter::SimpleHTTP::Regex::REQUEST
+                or $buffer =~ $POE::Filter::SimpleHTTP::Regex::RESPONSE)
+            {
+                push(@{$self->preamble()}, $self->get_chunk(\$buffer));
+                $self->state(+PREAMBLE_COMPLETE);
 
-				} else {
-					
-					return 
-                    [
-                        POE::Filter::SimpleHTTP::Error->new
-                        (
-                            +UNPARSABLE_PREAMBLE,
-                            $buffer
-                        )
-                    ];
-
-				}
-			}
+            } else {
+                
+                return 
+                [
+                    POE::Filter::SimpleHTTP::Error->new
+                    (
+                        {
+                            error => +UNPARSABLE_PREAMBLE,
+                            context => $buffer
+                        }
+                    )
+                ];
+            }
 
 		} elsif($state < +HEADER_COMPLETE) {
 			
@@ -248,13 +247,22 @@ sub
 			}
 
 		} else {
-		    
+            
+            if($buffer =~ /^\x0D\x0A$/)
+            {
+                # skip the blank lines at the end if we have them
+                substr($buffer, 0, 2, '');
+                next;
+            }
+
             return
             [
                 POE::Filter::SimpleHTTP::Error->new
                 (
-                    +TRAILING_DATA,
-                    $buffer
+                    {
+                        error => +TRAILING_DATA,
+                        context => $buffer
+                    }
                 )
             ];
 		}
@@ -262,7 +270,9 @@ sub
 		
 	if($self->state() == +CONTENT_COMPLETE)
 	{
-		return [$self->build_message()];
+		my $ret = [$self->build_message()];
+        $self->reset();
+        return $ret;
 	}
 	else
 	{
@@ -271,8 +281,7 @@ sub
 	}
 };
 
-override 'get_one_start' =>
-sub
+sub get_one_start()
 {
 	my ($self, $data) = @_;
 	
@@ -285,8 +294,7 @@ sub
 	
 };
 
-override 'put' =>
-sub
+sub put()
 {
 	my ($self, $content) = @_;
 	
@@ -379,8 +387,6 @@ sub build_message()
 		}
 	}
 
-	warn Dumper($message) if $DEBUG;
-	
 	# If we have a transfer encoding, we need to decode it 
 	# (ie. unchunkify, decompress, etc)
 	if($message->header('Transfer-Encoding'))
@@ -401,15 +407,16 @@ sub build_message()
 		my $buffer = '';
 		my $subbuff = '';
 		my $size = 0;
-
-		while( my $content_line = shift(@{$self->content()}) )
+        my $content = '';
+$DB::single=1;
+		while(defined(my $content_line = shift(@{$self->content()})) )
 		{
 			# Start of a new chunk
-			if($size == 0 and length($subbuff) == 0)
+			if($size == 0)
 			{
 				if($content_line =~ /^([\dA-Fa-f]+)(?:\x0D\x0A)*/)
 				{
-					warn $1;
+					warn "CHUNK SIZE IN HEX: $1" if $DEBUG;
 					$size = hex($1);
 				}
 				
@@ -417,6 +424,7 @@ sub build_message()
 				# headers if enabled
 				if($size == 0)
 				{
+                    warn "SIZE ZERO HIT" if $DEBUG;
 					if($message->header('Trailer'))
 					{
 						while( my $tline = shift(@{$self->content()}) )
@@ -428,25 +436,25 @@ sub build_message()
 							}
 						}
 					}
-					$self->reset();
 					return $message;
 				}
 			}
 			
 			while($size > 0)
 			{
-				warn $size;
+				warn "SIZE: $size" if $DEBUG;
 				my $subline = shift(@{$self->content()});
-				
 				while(length($subline))
 				{
-					my $buff = substr($subline, 0, 4096, '');
+                    warn 'LENGTH OF SUBLINE: ' . length($subline) if $DEBUG;
+					my $buff = substr($subline, 0, 4069, '');
 					$size -= length($buff);
 					$subbuff .= $buff;
 				}
 			}
 
 			$buffer .= $subbuff;
+            warn 'BUFFER LENGTH: ' .length($buffer) if $DEBUG;
 
 			$subbuff = '';
 		}
@@ -458,10 +466,17 @@ sub build_message()
             
             return POE::Filter::SimpleHTTP::Error->new
             (
-                +CHUNKED_ISNT_LAST,
-                join(' ',($chunk, @$te_s))
+                {
+                    error => +CHUNKED_ISNT_LAST,
+                    context => join(' ',($chunk, @$te_s))
+                }
             );
 		}
+        
+        if(!scalar(@$te_s))
+        {
+            $content = $buffer;
+        }
 
 		foreach my $te (@$te_s)
 		{
@@ -473,45 +488,57 @@ sub build_message()
 					warn 'INFLATE FAILED TO INIT' if $DEBUG;
                     return POE::Filter::SimpleHTTP::Error->new
                     (
-                        +INFLATE_FAILED_INIT,
-                        $status
+                        {
+                            error => +INFLATE_FAILED_INIT,
+                            context => $status
+                        }
                     );
 				}
 				else
 				{
-					my ($buffer, $status) = $inflate->(\$buffer);
+                    warn 'BUFFER LENGTH BEFORE INFLATE: '. length($buffer) if $DEBUG;
+					my ($content, $status) = $inflate->inflate(\$buffer);
+                    warn "DECOMPRESSED CONTENT: $content" if $DEBUG && $content;
 					if($status != +Z_OK or $status != +Z_STREAM_END)
 					{
 						warn 'INFLATE FAILED TO DECOMPRESS' if $DEBUG;
 						return POE::Filter::SimpleHTTP::Error->new
                         (
-                            +INFLATE_FAILED_INFLATE,
-                            $status
+                            {
+                                error => +INFLATE_FAILED_INFLATE,
+                                context => $status
+                            }
                         );
 					}
 				}
 			
 			} elsif($te =~ /compress/) {
 
-				$buffer = Compress::Zlib::uncompress(\$buffer);
-				if(!defined($buffer))
+				$content = Compress::Zlib::uncompress(\$buffer);
+				if(!defined($content))
 				{
 					warn 'UNCOMPRESS FAILED' if $DEBUG;
 					return POE::Filter::SimpleHTTP::Error->new
                     (
-                        +UNCOMPRESS_FAILED
+                        {
+                            error => +UNCOMPRESS_FAILED
+                        }
                     );
 				}
 
 			} elsif($te =~ /gzip/) {
 
-				$buffer = Complress::Zlib::memGunzip(\$buffer);
-				if(!defined($buffer))
+                warn 'BUFFER LENGTH BEFORE GUNZIP: '. length($buffer) if $DEBUG;
+				$content = Compress::Zlib::memGunzip(\$buffer);
+                warn "DECOMPRESSED CONTENT: $content" if $DEBUG;
+				if(!defined($content))
 				{
 					warn 'GUNZIP FAILED' if $DEBUG;
 					return POE::Filter::SimpleHTTP::Error->new
                     (
-                        +GUNZIP_FAILED
+                        {
+                            error => +GUNZIP_FAILED
+                        }
                     );
 				}
 			
@@ -520,13 +547,15 @@ sub build_message()
                 warn 'UNKNOWN TRANSFER ENCOODING' if $DEBUG;
                 return POE::Filter::SimpleHTTP::Error->new
                 (
-                    +UNKNOWN_TRANSFER_ENCODING,
-                    $te
+                    {
+                        error => +UNKNOWN_TRANSFER_ENCODING,
+                        context => $te
+                    }
                 );
 			}
 		}
 
-		$message->content_ref(\$buffer);
+		$message->content_ref(\$content);
 	
 	} else {
 

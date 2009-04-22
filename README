@@ -1,48 +1,39 @@
-POE-Filter-SimpleHTTP
+AUTHOR
+    Nicholas R. Perez, "<nicholasrperez at gmail.com>"
 
-The README is used to introduce the module and provide instructions on
-how to install the module, any machine dependencies it may have (for
-example C compilers and installed libraries) and any other information
-that should be provided before the module is installed.
+BUGS
+    Please report any bugs or feature requests to "bug-poe-filter-simplehttp
+    at rt.cpan.org", or through the web interface at
+    <http://rt.cpan.org/NoAuth/ReportBug.html?Queue=POE-Filter-SimpleHTTP>.
+    I will be notified, and then you'll automatically be notified of
+    progress on your bug as I make changes.
 
-A README file is required for CPAN modules since CPAN extracts the README
-file from a module distribution so that people browsing the archive
-can use it get an idea of the modules uses. It is usually a good idea
-to provide version information here so that people can decide whether
-fixes for the module are worth downloading.
+SUPPORT
+    You can find documentation for this module with the perldoc command.
 
-INSTALLATION
+        perldoc POE::Filter::SimpleHTTP
 
-To install this module, run the following commands:
+    You can also look for information at:
 
-    perl Build.PL
-    ./Build
-    ./Build test
-    ./Build install
+    *   AnnoCPAN: Annotated CPAN documentation
 
+        <http://annocpan.org/dist/POE-Filter-SimpleHTTP>
 
-SUPPORT AND DOCUMENTATION
+    *   CPAN Ratings
 
-After installing, you can find documentation for this module with the perldoc command.
+        <http://cpanratings.perl.org/d/POE-Filter-SimpleHTTP>
 
-    perldoc POE::Filter::SimpleHTTP
+    *   RT: CPAN's request tracker
 
-You can also look for information at:
+        <http://rt.cpan.org/NoAuth/Bugs.html?Dist=POE-Filter-SimpleHTTP>
 
-    Search CPAN
-        http://search.cpan.org/dist/POE-Filter-SimpleHTTP
+    *   Search CPAN
 
-    CPAN Request Tracker:
-        http://rt.cpan.org/NoAuth/Bugs.html?Dist=POE-Filter-SimpleHTTP
+        <http://search.cpan.org/dist/POE-Filter-SimpleHTTP>
 
-    AnnoCPAN, annotated CPAN documentation:
-        http://annocpan.org/dist/POE-Filter-SimpleHTTP
+ACKNOWLEDGEMENTS
+COPYRIGHT & LICENSE
+    Copyright 2007 Nicholas R. Perez, all rights reserved.
 
-    CPAN Ratings:
-        http://cpanratings.perl.org/d/POE-Filter-SimpleHTTP
+    This program is released under the following license: gpl
 
-COPYRIGHT AND LICENCE
-
-Copyright (C) 2007 Nicholas R. Perez
-
-This program is released under the following license: gpl

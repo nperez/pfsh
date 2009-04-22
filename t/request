@@ -1,0 +1,6 @@
+GET / HTTP/1.0
+User-Agent: Wget/1.11.4
+Accept: */*
+Host: localhost:64000
+Connection: Keep-Alive
+

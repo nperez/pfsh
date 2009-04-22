@@ -67,8 +67,17 @@ my $oct			= gen_octet();
 my $char		= gen_char();
 my $upalpha		= '[A-Z]';
 my $loalpha		= '[a-z]';
-my $alpha		= "(?:$upalpha|$loalpha)";
+my $mark        = q|[_.!~*'()-]|;
 my $digit		= '[0-9]';
+my $hex			= "[a-fA-F]|$digit]";
+my $alpha		= "(?:$upalpha|$loalpha)";
+my $alphanum    = "(?:$alpha|$digit)";
+my $unreserved  = "(?:$alphanum|$mark)";
+my $escaped     = "(?:%$hex+)";
+my $pchar       = "(?:$unreserved|$escaped|".'[:@&=+$,])';
+my $segment     = "(?:$pchar*(?:;$pchar)*)";
+my $path_segs   = "(?:$segment(?:/$segment)*)";
+my $abs_path    = "(?:/$path_segs)";
 my $ctrl		= gen_ctrl();
 my $cr			= chr(13);
 my $lf			= chr(10);
@@ -78,7 +87,6 @@ my $dq			= chr(34);
 my $crlf		= "(?:$cr$lf)";
 my $lws			= "(?:$crlf*(?:$sp|$ht)+)";
 my $text		= exclude($ctrl,$oct);
-my $hex			= "[a-fA-F]|$digit]";
 my $separators 	= gen_separators();
 my $token		= exclude( $ctrl, exclude( $separators, $char ) );
 my $ctext		= exclude( "[()]", $text );
@@ -94,8 +102,7 @@ my $f_value		= "(?:(?:$f_content+)|$lws)";
 
 my $header		= "($token+):($f_value*)";
 my $method 		= "OPTIONS|GET|HEAD|POST|PUT|DELETE|CONNECT|$token";
-my $req_line	= "($method)$sp($RE{'URI'}->{'HTTP'})"
-				. "$sp($httpvers)$crlf*";
+my $req_line	= "($method)$sp(" . $RE{'URI'}{'HTTP'}.'|'. $abs_path. ")$sp($httpvers)$crlf*";
 my $resp_code	= $digit . '{3}';
 my $resp_line	= "($httpvers)$sp($resp_code)$sp($text)*$crlf*";
 
@@ -144,6 +151,16 @@ our $HEADER = qr/$header/;
 #	warn $1;
 #	warn $2;
 #}
+#
+#my $COMB_REQ = "GET / $HTTP";
+#
+#if($COMB_REQ =~ $POE::Filter::SimpleHTTP::Regex::REQUEST)
+#{
+#    warn 'PASSED REQUEST';
+#}
+
+#warn $POE::Filter::SimpleHTTP::Regex::REQUEST;
+
 #$string =~ s/[[:cntrl:]]//g;
 #$string =~ s/(?<!\\)(\()(?!\?:)/\n$1\n/g;
 #$string =~ s/(?<!\\)(\()(?=\?:)/\n\t$1/g;
