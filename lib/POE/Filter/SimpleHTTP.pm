@@ -1,11 +1,12 @@
 package POE::Filter::SimpleHTTP;
 use 5.010;
 use Moose;
-extends('POE::Filter', 'Moose::Object');
+extends('POE::Filter', 'Exporter', 'Moose::Object');
 
 use Moose::Util::TypeConstraints;
 
-use Data::Dumper;
+use Scalar::Util('blessed', 'reftype');
+
 use HTTP::Status;
 use HTTP::Response;
 use HTTP::Request;
@@ -18,6 +19,7 @@ use POE::Filter::SimpleHTTP::Error;
 use bytes;
 
 our $VERSION = '0.01';
+our @EXPORT = qw/PFSH_CLIENT PFSH_SERVER/;
 our $DEBUG = 0;
 
 use constant
@@ -26,8 +28,8 @@ use constant
     PREAMBLE_COMPLETE   => 1,
     HEADER_COMPLETE     => 2,
     CONTENT_COMPLETE    => 3,
-    CLIENT_MODE         => 0,
-    SERVER_MODE         => 1,
+    PFSH_CLIENT         => 0,
+    PFSH_SERVER         => 1,
 };
 
 subtype 'ParseState'
@@ -37,20 +39,28 @@ subtype 'ParseState'
 
 subtype 'FilterMode'
     => as 'Int'
-    => where { $_ == 0 || $_ == 0 }
+    => where { $_ == 0 || $_ == 1 }
     => message { 'Incorrect FilterMode' };
 
 subtype 'Uri'
-    => as 'Object'
-    => where { $_->isa('URI') };
+    => as 'Str'
+    => where { /$POE::Filter::SimpleHTTP::Regex::URI/ }
+    => message { 'Invalid URI string' };
 
-coerce 'Uri'
-    => from 'Object'
-        => via { $_->isa('URI') 
-            ? $_ 
-            : Params::Coerce::coerce( 'URI', $_ ) }
-    => from 'Str'
-        => via { URI->new( $_, 'http' ) };
+subtype 'HttpStatus'
+    => as 'Int'
+    => where { is_info($_) || is_success($_) || is_redirect($_) || is_error($_) }
+    => message { 'Invalid HTTP status code'};
+
+subtype 'HttpProtocol'
+    => as 'Str'
+    => where { /$POE::Filter::SimpleHTTP::Regex::PROTOCOL/ }
+    => message { 'Invalid HTTP protocol string' };
+
+subtype 'HttpMethod'
+    => as 'Str'
+    => where { /$POE::Filter::SimpleHTTP::Regex::METHOD/ }
+    => message { 'Invalid HTTP method' };
 
 has raw => 
 (
@@ -145,6 +155,30 @@ has mimetype =>
     lazy => 1
 );
 
+has status =>
+(
+    is => 'rw',
+    isa => 'HttpStatus',
+    default => 200,
+    lazy => 1
+);
+
+has protocol =>
+(
+    is => 'rw',
+    isa => 'HttpProtocol',
+    default => 'HTTP/1.1',
+    lazy => 1
+);
+
+has 'method' =>
+(
+    is => 'rw',
+    isa => 'HttpMethod',
+    default => 'GET',
+    lazy => 1
+);
+
 sub new 
 {
     my $class = shift(@_);
@@ -155,7 +189,6 @@ sub new
         @_,
     );
 }
-
 
 sub reset()
 {
@@ -298,36 +331,59 @@ sub put()
 {
 	my ($self, $content) = @_;
 	
-	my $http;
+    my $ret = [];
 
-	if($self->mode() == +SERVER_MODE)
-	{
-		my $response;
-		
-        $response = HTTP::Response->new(+RC_OK);
-        $response->content_type($self->mimetype());
-        $response->server($self->server());
-        
-        $response->add_content($_) for @$content;
+    while(@$content)
+    {
+        my $check = shift(@$content);
 
-		$http = $response;
+        if(blessed($check) && $check->isa('HTTP::Message'))
+        {
+            push(@$ret, $check);
+            next;
+        }
 
-	} else {
+        unshift(@$content, $check);
 
-		my $request = HTTP::Request->new();
+        my $http;
 
-        $request->method('POST');
-        $request->uri($self->uri());
-        $request->user_agent($self->useragent()); 
-        
-		$request->add_content($_) for @$content;
-		
-		$http = $request;
+        if($self->mode() == +PFSH_SERVER)
+        {
+            my $response;
+            
+            $response = HTTP::Response->new($self->status());
+            $response->content_type($self->mimetype());
+            $response->server($self->server());
+            
+            while(@$content)
+            {
+                $response->add_content(shift(@$content));
+            }
+
+            $http = $response;
+
+        } else {
+
+            my $request = HTTP::Request->new();
+
+            $request->method($self->method());
+            $request->uri($self->uri());
+            $request->user_agent($self->useragent()); 
+            $request->content_type($self->mimetype());
+
+            while(@$content)
+            {
+                $request->add_content(shift(@$content));
+            }
+            
+            $http = $request;
+        }
+
+        $http->protocol($self->protocol());
+        push(@$ret, $http);
 	}
 
-	$http->protocol('HTTP/1.0');
-	
-	return [$http];
+    return $ret;
 };
 
 
@@ -566,54 +622,30 @@ $DB::single=1;
 	return $message;
 }
 
-=head1 AUTHOR
+=pod
 
-Nicholas R. Perez, C<< <nicholasrperez at gmail.com> >>
+=head1 NAME
 
-=head1 BUGS
+POE::Filter::SimpleHTTP - A simple client/server suitable HTTP filter
 
-Please report any bugs or feature requests to
-C<bug-poe-filter-simplehttp at rt.cpan.org>, or through the web interface at
-L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=POE-Filter-SimpleHTTP>.
-I will be notified, and then you'll automatically be notified of progress on
-your bug as I make changes.
+=head1 SYNOPSIS
 
-=head1 SUPPORT
+use POE::Filter::SimpleHTTP;
+use HTTP::Request;
+use HTTP::Respose;
+use HTTP::Status;
 
-You can find documentation for this module with the perldoc command.
+my $filter = POE::Filter::SimpleHTTP->new
+(
+    {
+        mode        => +CLIENT_MODE,
+        useragent   => 'Whizbang Client/0.01',
+        host        => 'remote.server.com',
+    }
+);
 
-    perldoc POE::Filter::SimpleHTTP
 
-You can also look for information at:
-
-=over 4
-
-=item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/POE-Filter-SimpleHTTP>
-
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/POE-Filter-SimpleHTTP>
-
-=item * RT: CPAN's request tracker
-
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=POE-Filter-SimpleHTTP>
-
-=item * Search CPAN
-
-L<http://search.cpan.org/dist/POE-Filter-SimpleHTTP>
-
-=back
-
-=head1 ACKNOWLEDGEMENTS
-
-=head1 COPYRIGHT & LICENSE
-
-Copyright 2007 Nicholas R. Perez, all rights reserved.
-
-This program is released under the following license: gpl
 
 =cut
 
-1; # End of POE::Filter::SimpleHTTP
+1;

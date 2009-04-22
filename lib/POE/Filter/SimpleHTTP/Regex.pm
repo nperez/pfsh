@@ -109,6 +109,9 @@ my $resp_line	= "($httpvers)$sp($resp_code)$sp($text)*$crlf*";
 our $RESPONSE = qr/$resp_line/;
 our $REQUEST = qr/$req_line/;
 our $HEADER = qr/$header/;
+our $PROTOCOL = qr/$httpvers/;
+our $METHOD = qr/$method/;
+our $URI = qr/$RE{'URI'}{'HTTP'}|$abs_path/;
 
 #my $HTTP = 'HTTP/1.1';
 #my $CODE = '200';
