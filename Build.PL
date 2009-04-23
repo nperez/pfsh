@@ -12,11 +12,12 @@ my $builder = Module::Build->new(
     build_requires      => 
     {
         'Test::More'        => 0,
-        'Moose'            => 0.75,
+        'Moose'             => 0.75,
         'Regexp::Common'    => 2.122,
         'LWP'               => 5.822,
         'URI'               => 1.37,
         'Compress::Zlib'    => 2.012,
+        'UNIVERSAL::isa'    => 1.01,
     },
     add_to_cleanup      => [ 'POE-Filter-SimpleHTTP-*' ],
     meta_merge          => 

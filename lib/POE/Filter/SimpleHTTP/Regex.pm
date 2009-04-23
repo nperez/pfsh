@@ -6,6 +6,8 @@ use strict;
 use bytes;
 use Regexp::Common('URI');
 
+our $VERSION = '0.01';
+
 sub quote_it
 {
     $_[0] =~ s/([^[:alnum:][:cntrl:][:space:]])/\\$1/g;

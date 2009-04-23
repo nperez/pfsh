@@ -1,7 +1,7 @@
 package POE::Filter::SimpleHTTP;
 use 5.010;
 use Moose;
-extends('POE::Filter', 'Exporter', 'Moose::Object');
+extends('Exporter', 'Moose::Object');
 
 use Moose::Util::TypeConstraints;
 
@@ -15,6 +15,8 @@ use Compress::Zlib;
 
 use POE::Filter::SimpleHTTP::Regex;
 use POE::Filter::SimpleHTTP::Error;
+
+use UNIVERSAL::isa;
 
 use bytes;
 
@@ -179,15 +181,17 @@ has 'method' =>
     lazy => 1
 );
 
-sub new 
+sub isa()
 {
-    my $class = shift(@_);
-
-    return $class->meta->new_object
-    (
-        __INSTANCE__ => bless({}, $class),
-        @_,
-    );
+    my ($self, $arg) = (shift(@_), shift(@_));
+    if($arg eq 'POE::Filter')
+    {
+        return 1;
+    }
+    else
+    {
+        return $self->SUPER::isa($arg);
+    }
 }
 
 sub reset()
@@ -638,14 +642,123 @@ use HTTP::Status;
 my $filter = POE::Filter::SimpleHTTP->new
 (
     {
-        mode        => +CLIENT_MODE,
+        mode        => +PFSH_CLIENT,
         useragent   => 'Whizbang Client/0.01',
         host        => 'remote.server.com',
+        method      => 'POST'
     }
 );
 
+my $post = $filter->put([qw|id=123& data=Here is some data|])->[0];
 
+=head1 DESCRIPTION
+
+POE::Filter::SimpleHTTP is a filter designed to be used in either a client or 
+a server context with the ability to switch the mode at runtime. In fact, a lot
+of the behaviors can be altered at runtime. Which means you can put() just your
+data into the filter and out the other side will be appropriate HTTP::Messages.
+
+=head1 PUBLIC ACCESSORS
+
+=over 4
+
+=item mode
+
+Use this access to change how the filter operates for put() if raw data is 
+passed in. In +PFSH_CLIENT mode, an HTTP::Request will be constructed using 
+data stored in other attributes of the filter. The obverse, if +PFSH_SERVER is 
+set, then HTTP::Responses will be built. Regardless of mode, all HTTP::Messages
+passed to put() will be passed through without any modification. It defaults to
++PFSH_CLIENT.
+
+=item uri
+
+This accessor is used to change the URI part of the HTTP::Request objects built
+in put() if raw data is passed. It can either be full on HTTP URI or an 
+absolute path. It defaults to '/'
+
+=item useragent
+
+Use this to change the user agent header on constructed HTTP::Request objects. 
+It defaults to __PACKAGE__ . '/' . $VERSION.
+
+=item host
+
+Use this to change the host header on constructed HTTP::Requests. It defaults 
+to 'localhost'
+
+=item status
+
+Use this to set the status codes for constructed HTTP::Responses. It defaults 
+to 200 (aka, HTTP_OK).
+
+=item method
+
+This accessor is used to change the method on constructed HTTP::Requests. It
+defaults to 'GET'.
+
+=item mimetype
+
+This accessor is for the Content-Type header on constructed HTTP::Messages.
+Regardless of mode(), constructed Requests and Responses will use this value.
+It defaults to 'text/plain'
+
+=back
+
+=head1 PUBLIC METHODS
+
+This filter is based on POE::Filter and so only the differences in public API
+will be mentioned below
+
+=over 4
+
+=item new()
+
+The constructor can be called with no arguments in which all of the defaults 
+mentioned above in the accessors will be used, or a hash or hashref may be 
+passed in with the keys corresponding to the accessors. Returns a new filter
+instance.
+
+=item reset()
+
+This method will clear all of the internal buffers of the filter (but leave the
+values provided to the accessors or constructor alone) back to their default 
+state. 
+
+=item put()
+
+put() can accept either HTTP::Message based objects or raw data. If a Message
+based object (ie. blessed($obj) && $obj->isa('HTTP::Message')) is passed in, 
+it will be passed out exactly as is, untouched. 
+
+But if raw data is passed in, depending on mode(), it will construct a suitable
+HTTP::Message (Request or Response) using the various values stored in the
+above accessors, and return it.
+
+=back
+
+=head1 NOTES
+
+This is a simple filter in name and in implementation. Regardless of mode() the
+get_one_start()/get_one() interface can accept both Responses and Requests. If 
+for whatever reason there is an error in parsing the data an Error object will
+be returned with an particular constant, and a snippet of context (if available
+at the time the error occurred). See POE::Filter::SimpleHTTP::Error for details
+on what the objects look like.
+
+This filter should confrom to HTTP/0.9-HTTP/1.1 with regards to transfer 
+encodings (chunked, compressed, etc), in which case the data will be unchunked
+and uncompressed and stored in the content() of the Message. Note that this 
+does not include Content-Encoding which HTTP::Message should handle for you.
+
+=head1 AUTHOR
+
+Copyright 2007 - 2009 Nicholas Perez.
+Licensed and distributed under the GPL.
 
 =cut
+
+__PACKAGE__->meta->make_immutable();
+no Moose;
 
 1;

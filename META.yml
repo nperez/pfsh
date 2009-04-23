@@ -14,10 +14,17 @@ build_requires:
   Moose: 0.75
   Regexp::Common: 2.122
   Test::More: 0
+  UNIVERSAL::isa: 1.01
   URI: 1.37
 provides:
   POE::Filter::SimpleHTTP:
     file: lib/POE/Filter/SimpleHTTP.pm
+    version: 0.01
+  POE::Filter::SimpleHTTP::Error:
+    file: lib/POE/Filter/SimpleHTTP/Error.pm
+    version: 0.01
+  POE::Filter::SimpleHTTP::Regex:
+    file: lib/POE/Filter/SimpleHTTP/Regex.pm
     version: 0.01
 generated_by: Module::Build version 0.280801
 meta-spec:
