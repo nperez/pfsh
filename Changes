@@ -1,0 +1,9 @@
+Revision history for {{ $dist->name }}:{{ $dist->version }}
+
+{{ $NEXT }}
+        Add clone method
+        Switch to Dist::Zilla for distribution building
+
+0.01    
+        First version, released on an unsuspecting world.
+

@@ -2,8 +2,6 @@ package POE::Filter::SimpleHTTP::Error;
 use Moose;
 use Moose::Util::TypeConstraints;
 
-our $VERSION = '0.01';
-
 use constant
 {
    UNPARSABLE_PREAMBLE          => 0,
@@ -44,8 +42,7 @@ has 'context' =>
 
 =head1 NAME
 
-POE::Filter::SimpleHTTP::Error - An error object for reporting errors in
-POE::Filter::SimpleHTTP
+POE::Filter::SimpleHTTP::Error - An error object for SimpleHTTP
 
 =head1 SYNOPSIS
 

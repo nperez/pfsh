@@ -20,7 +20,6 @@ use UNIVERSAL::isa;
 
 use bytes;
 
-our $VERSION = '0.01';
 our @EXPORT = qw/PFSH_CLIENT PFSH_SERVER/;
 our $DEBUG = 0;
 
@@ -180,6 +179,12 @@ has 'method' =>
     default => 'GET',
     lazy => 1
 );
+
+sub clone()
+{
+    my ($self, %params) = @_;
+    return $self->meta->clone_object($self, %params);
+}
 
 sub isa()
 {

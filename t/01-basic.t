@@ -2,7 +2,7 @@ use warnings;
 use strict;
 
 use Data::Dumper;
-use Test::More('tests', 16);
+use Test::More('tests', 19);
 use HTTP::Status;
 
 BEGIN
@@ -113,6 +113,10 @@ my $filter = POE::Filter::SimpleHTTP->new();
 isa_ok($filter, 'POE::Filter');
 isa_ok($filter, 'Moose::Object');
 isa_ok($filter, 'POE::Filter::SimpleHTTP');
+my $clone = $filter->clone();
+isa_ok($clone, 'POE::Filter');
+isa_ok($clone, 'Moose::Object');
+isa_ok($clone, 'POE::Filter::SimpleHTTP');
 
 $request_data =~ s/\n/\x0d\x0a/g;
 $filter->get_one_start($request_data);
