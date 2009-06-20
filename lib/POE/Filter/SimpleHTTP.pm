@@ -277,16 +277,13 @@ sub get_one()
 
 			} else {
 				
-				if(index($buffer, "\x0D\x0A") == -1)
-				{
-					push(@{$self->content}, $buffer);
-				
-				} else {
-
-					push(@{$self->content}, $self->get_chunk(\$buffer));
-				}
-
+                push(@{$self->content}, $self->get_chunk(\$buffer));
 			}
+
+            if(!@{$self->raw} && !length($buffer))
+            {
+                $self->state(+CONTENT_COMPLETE);
+            }
 
 		} else {
             
