@@ -1,6 +1,9 @@
-Revision history for {{ $dist->name }}:{{ $dist->version }}
+Revision history for POE-Filter-SimpleHTTP : {{ $dist->version }}
 
 {{ $NEXT }}
+        Fix bug with regards to un-network-newline terminated messages
+
+0.091700  2009-06-19 23:02:23 UTC
         Add clone method
         Switch to Dist::Zilla for distribution building
 
